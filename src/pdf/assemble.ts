@@ -400,6 +400,15 @@ function sameColour(fill: number[], c: { r: number; g: number; b: number }): boo
  */
 function takeOutlines(page: Scope, a: ExportA, plan: PagePlan): Set<Contour> {
   const paths = readPaths(page);
+  // Glyph boxes come from Font Helper; an older Font Helper doesn't send them.
+  for (const lp of plan.lines) {
+    if (lp.reason) continue;
+    const noBox = lp.line.glyphs.some((g, gi) => {
+      const fig = a.fonts.get(g.font)?.glyphs.get(g.code);
+      return fig && fig.urx - fig.llx > 0 && !plan.fonts.get(lp.glyphFont[gi])?.prepared?.glyphs?.[lp.glyphEntry[gi]]?.box;
+    });
+    if (noBox) lp.reason = "Font Helper needs updating";
+  }
   const lines = plan.lines.map((lp) => lp.line);
 
   for (let round = 0; round < 5; round++) {
