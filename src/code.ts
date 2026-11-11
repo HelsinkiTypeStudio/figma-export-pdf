@@ -37,10 +37,10 @@ function bar(f: number): string {
 }
 
 /** Shows the progress bar, with a new label or how far along it is. */
-function progress(f: number = fraction, text: string = label) {
+function progress(f: number = fraction, text: string = label, showBar = true) {
   fraction = f;
   label = text;
-  say(`${label}   ${bar(fraction)}`, {
+  say(showBar ? `${label}   ${bar(fraction)}` : label, {
     timeout: Infinity,
     button: { text: "Cancel", action: () => { cancelled = true; finish("Export cancelled."); return true; } },
   });
@@ -254,7 +254,7 @@ figma.ui.onmessage = async (m: ToMain) => {
       pageDone?.();
       break;
     case "status":
-      if (!cancelled && !closing) progress(m.fraction ?? fraction, m.text ?? label);
+      if (!cancelled && !closing) progress(m.fraction ?? fraction, m.text ?? label, !m.noBar);
       break;
     case "finished":
       finish(m.message, m.report, m.error);

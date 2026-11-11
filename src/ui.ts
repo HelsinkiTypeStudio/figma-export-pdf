@@ -116,7 +116,7 @@ async function onDone() {
   out.setCreator("Figma");
   const bytes = await out.save({ useObjectStreams: true, objectsPerTick: Infinity });
   timing.push(`joining pages ${((t1 - t0) / 1000).toFixed(1)} s, writing the file ${((Date.now() - t1) / 1000).toFixed(1)} s`);
-  send({ type: "status", text: "Choose where to save the PDF", fraction: 1 });
+  send({ type: "status", text: "Choose where to save the PDF", fraction: 1, noBar: true });
   const t2 = Date.now();
   const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
   timing.push(`saving ${((Date.now() - t2) / 1000).toFixed(1)} s (dialog and making it smaller included)`);

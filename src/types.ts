@@ -54,6 +54,6 @@ export type ToMain =
   | { type: "go" }
   | { type: "stop"; message: string }
   | { type: "page-done" }
-  | { type: "status"; text?: string; fraction?: number }
+  | { type: "status"; text?: string; fraction?: number; noBar?: boolean }
   | { type: "finished"; message: string; report: string; error?: boolean }
   | { type: "close" };
