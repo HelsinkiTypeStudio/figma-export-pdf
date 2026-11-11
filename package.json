@@ -1,0 +1,23 @@
+{
+  "name": "figma-export-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Export Figma frames and slides as PDFs with real, selectable text in your own fonts.",
+  "license": "MIT",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/run.mjs"
+  },
+  "dependencies": {
+    "pako": "^2.1.0",
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.100.0",
+    "@types/pako": "^2.0.3",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
