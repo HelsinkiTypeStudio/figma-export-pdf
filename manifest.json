@@ -1,5 +1,5 @@
 {
-  "name": "Export PDF with Real Text",
+  "name": "Export PDF optimised for presentations",
   "id": "figma-export-pdf",
   "api": "1.0.0",
   "main": "dist/code.js",

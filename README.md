@@ -1,4 +1,4 @@
-# Export PDF with Real Text
+# Export PDF optimised for presentations
 
 A Figma plugin that exports frames and slides as PDFs with real, selectable text in your own fonts. Glyphs stay exactly where Figma put them, and no font is ever swapped for another.
 
@@ -25,7 +25,7 @@ In Figma: **Plugins → Development → Import plugin from manifest…** and cho
 ## Use
 
 1. In Slides, nothing needs selecting: every slide is exported. In Design, select the frames to export, or nothing for every top-level frame on the page.
-2. Choose **Export PDF with Real Text** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Font Helper asks whether to allow the plugin.
+2. Choose **Export PDF optimised for presentations** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Font Helper asks whether to allow the plugin.
 3. Choose where to save. The dialog opens in the folder you used last.
 
 A progress bar shows at the bottom of the screen. At the end it says "PDF saved", or "Export failed" with a **Details** button. Which text stayed as outlines, and why, is written to the plugin console (Plugins › Development › Show/Hide Console).

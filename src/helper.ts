@@ -27,7 +27,7 @@ export class Helper {
   /** Asks Font Helper for a key; it shows you an Allow dialog first. */
   async pair(): Promise<boolean> {
     const r = await fetch(`${BASE}/pair`, {
-      method: "POST", headers: this.headers(true), body: JSON.stringify({ plugin: "Export PDF with Real Text" }),
+      method: "POST", headers: this.headers(true), body: JSON.stringify({ plugin: "Export PDF optimised for presentations" }),
     });
     if (!r.ok) return false;
     const j = await r.json();
