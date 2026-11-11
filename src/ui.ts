@@ -125,10 +125,12 @@ async function onDone() {
   send({ type: "status", text: `Ready (${mb} MB, ${seconds} s). Choose where to save it.` });
   const t2 = Date.now();
   const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
-  timing.push(`saving ${((Date.now() - t2) / 1000).toFixed(1)} s (dialog included)`);
+  timing.push(`saving ${((Date.now() - t2) / 1000).toFixed(1)} s (dialog and making it smaller included)`);
   const { written, total } = counts();
   if (saved) {
-    send({ type: "finished", message: `Saved ${saved.split("/").pop()} (${mb} MB). ${written} of ${total} lines are real text.`, report: report() });
+    const savedMb = (saved.bytes / 1024 / 1024).toFixed(1);
+    const size = saved.bytes < bytes.length ? `${savedMb} MB, made smaller from ${mb} MB` : `${mb} MB`;
+    send({ type: "finished", message: `Saved ${saved.path.split("/").pop()} (${size}). ${written} of ${total} lines are real text.`, report: report() });
   } else {
     send({ type: "finished", message: "Not saved.", report: "" });
   }

@@ -46,13 +46,16 @@ export class Helper {
     }
   }
 
-  /** Shows a save dialog. Returns the saved path, or null if you cancelled. */
-  async save(name: string, bytes: Uint8Array): Promise<string | null> {
+  /**
+   * Shows a save dialog. Font Helper may make the PDF smaller before writing it. Returns the
+   * saved path and size, or null if you cancelled.
+   */
+  async save(name: string, bytes: Uint8Array): Promise<{ path: string; bytes: number } | null> {
     const r = await fetch(`${BASE}/save?name=${encodeURIComponent(name)}`, {
       method: "POST", headers: { ...this.headers(), "Content-Type": "application/pdf" }, body: new Blob([bytes as BlobPart]),
     });
     const j = await r.json();
     if (j.error) throw new Error(j.error);
-    return j.saved ?? null;
+    return j.saved ? { path: j.saved, bytes: j.bytes ?? bytes.length } : null;
   }
 }
