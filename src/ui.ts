@@ -38,7 +38,7 @@ async function checkHelper(): Promise<string | null> {
 }
 
 async function onPage(job: PageJob) {
-  const aDoc = await PDFDocument.load(job.a, { updateMetadata: false });
+  const aDoc = await PDFDocument.load(job.a, { updateMetadata: false, parseSpeed: Infinity });
   const st: PageState = { job, result: aDoc };
   pages[job.index] = st;
   try {
@@ -53,7 +53,7 @@ async function onPage(job: PageJob) {
     assemblePage(aDoc, a, plan);
   } catch (e) {
     // Anything unexpected: this page stays exactly as Figma exported it.
-    st.result = await PDFDocument.load(job.a, { updateMetadata: false });
+    st.result = await PDFDocument.load(job.a, { updateMetadata: false, parseSpeed: Infinity });
     st.note = `page kept as Figma exported it: ${(e as Error).message}`;
     for (const lp of st.plan?.lines ?? []) if (!lp.reason) lp.reason = "page kept as Figma exported it";
   }
@@ -107,7 +107,7 @@ async function onDone() {
   out.setTitle(fileName);
   out.setProducer("figma-export-pdf with Font Helper");
   out.setCreator("Figma");
-  const bytes = await out.save({ useObjectStreams: true });
+  const bytes = await out.save({ useObjectStreams: true, objectsPerTick: Infinity });
   const mb = (bytes.length / 1024 / 1024).toFixed(1);
   const seconds = Math.round((Date.now() - started) / 1000);
   send({ type: "status", text: `Ready (${mb} MB, ${seconds} s). Choose where to save it.` });
