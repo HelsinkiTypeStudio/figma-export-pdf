@@ -42,7 +42,8 @@ function progress(f: number = fraction, text: string = label, showBar = true) {
   label = text;
   say(showBar ? `${label}   ${bar(fraction)}` : label, {
     timeout: Infinity,
-    button: { text: "Cancel", action: () => { cancelled = true; finish("Export cancelled."); return true; } },
+    // Stops everything at once: closing the plugin ends the export and the hidden window mid-step.
+    button: { text: "Cancel", action: () => { cancelled = true; closing = true; figma.closePlugin("Export cancelled"); return true; } },
   });
 }
 
