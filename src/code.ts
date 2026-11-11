@@ -123,12 +123,28 @@ function paints(n: SceneNode): boolean {
   return ("fills" in n && visiblePaints(n.fills)) || ("strokes" in n && visiblePaints(n.strokes)) || visibleEffects(n);
 }
 
+const EFFECT_NAMES: Record<string, string> = {
+  DROP_SHADOW: "drop shadow", INNER_SHADOW: "inner shadow", LAYER_BLUR: "layer blur", BACKGROUND_BLUR: "background blur",
+};
+
+/** Effects that change how the layer's contents look. A frame's shadows and background blur don't touch what's inside it; on text, every effect counts. */
+function effectProblem(n: SceneNode): string | undefined {
+  if (!("effects" in n) || !Array.isArray(n.effects)) return undefined;
+  const isText = n.type === "TEXT";
+  for (const e of n.effects) {
+    if (!e.visible) continue;
+    if (!isText && (e.type === "DROP_SHADOW" || e.type === "INNER_SHADOW" || e.type === "BACKGROUND_BLUR")) continue;
+    const name = EFFECT_NAMES[e.type] ?? e.type.toLowerCase().replace(/_/g, " ");
+    return isText ? `text with a ${name}` : `inside a layer with a ${name}`;
+  }
+  return undefined;
+}
+
 /** Layer-level reasons a node changes how what's inside it looks. */
 function layerProblem(n: SceneNode): string | undefined {
   if ("opacity" in n && n.opacity < 1) return "see-through layer";
   if ("blendMode" in n && n.blendMode !== "PASS_THROUGH" && n.blendMode !== "NORMAL") return "layer blend mode";
-  if (visibleEffects(n)) return "layer effects";
-  return undefined;
+  return effectProblem(n);
 }
 
 interface TextRecord {
