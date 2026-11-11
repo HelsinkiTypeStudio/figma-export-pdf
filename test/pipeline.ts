@@ -1,7 +1,7 @@
 // Runs the plugin's PDF side outside Figma, on exports saved by the figma-export-pdf test
 // plugin (test02): "<stem>-A-as-is.pdf" (Figma's own PDF) and "<stem>-texts.json" (the text
 // layers). Writes "<stem>-real-text.pdf" and lists which lines stayed as outlines, and why.
-// Font Helper's font work (fontwork.py) is run directly, with font files found by family name.
+// Figma Friend's font work (fontwork.py) is run directly, with font files found by family name.
 //
 // node test/run.mjs <exports folder> <fonts folder> <path to fontwork.py> <output folder>
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";

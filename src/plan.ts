@@ -3,7 +3,7 @@ import type { ExportA, FigmaGlyph, HiddenLine } from "./pdf/figma-a";
 import { matchLines, LineMatch } from "./match";
 import type { SolidFill, TextInfo } from "./types";
 
-/** What Font Helper answers for one font (see font-helper's fontwork.py). */
+/** What Figma Friend answers for one font (see font-helper's fontwork.py). */
 export interface PreparedFont {
   ok: boolean;
   error?: string;
@@ -105,7 +105,7 @@ export function planPage(a: ExportA, texts: TextInfo[]): PagePlan {
   return { lines, fonts };
 }
 
-/** Step 2, after Font Helper has answered: keep only lines whose every glyph was found. */
+/** Step 2, after Figma Friend has answered: keep only lines whose every glyph was found. */
 export function finishPlan(plan: PagePlan): void {
   for (const lp of plan.lines) {
     if (lp.reason || !lp.match) continue;
@@ -114,7 +114,7 @@ export function finishPlan(plan: PagePlan): void {
     lp.line.glyphs.forEach((g, gi) => {
       const fp = plan.fonts.get(lp.glyphFont[gi])!;
       const p = fp.prepared;
-      if (!p || !p.ok) { problem = p?.error === "not installed" ? `${fp.request.family} ${fp.request.style} isn't installed` : `couldn't read ${fp.request.family} ${fp.request.style}: ${p?.error ?? "Font Helper didn't answer"}`; return; }
+      if (!p || !p.ok) { problem = p?.error === "not installed" ? `${fp.request.family} ${fp.request.style} isn't installed` : `couldn't read ${fp.request.family} ${fp.request.style}: ${p?.error ?? "Figma Friend didn't answer"}`; return; }
       if (p.glyphs![lp.glyphEntry[gi]].gid === null) missing.push(g.chars || `#${g.code}`);
     });
     if (problem) { lp.reason = problem; continue; }

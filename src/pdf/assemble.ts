@@ -63,7 +63,7 @@ function embedFont(doc: PDFDocument, fp: FontPlan, resName: string): EmbeddedFon
   const entries = fp.request.glyphs;
   const gids = p.glyphs!.map((g) => g.gid);
   // TrueType: one CID per entry (glyph plus its typed characters), mapped to the glyph by a
-  // CIDToGIDMap, so a glyph Figma used for two characters copies as each. CFF: Font Helper
+  // CIDToGIDMap, so a glyph Figma used for two characters copies as each. CFF: Figma Friend
   // already built one glyph per entry, and the CID is the glyph number.
   const cid = (e: number) => (isCFF ? (gids[e] as number) : e + 1);
 
@@ -160,7 +160,7 @@ function freeName(dict: PDFDict, prefix: string): string {
   for (let i = 1; ; i++) if (!used.has(`${prefix}${i}`)) return `${prefix}${i}`;
 }
 
-/** Real text for one line, in the fonts from Font Helper. */
+/** Real text for one line, in the fonts from Figma Friend. */
 function realLine(lp: LinePlan, fonts: Map<string, EmbeddedFont>, colorSpace: string | undefined): string {
   const line = lp.line;
   const fill = lp.fill!;
@@ -400,14 +400,14 @@ function sameColour(fill: number[], c: { r: number; g: number; b: number }): boo
  */
 function takeOutlines(page: Scope, a: ExportA, plan: PagePlan): Set<Contour> {
   const paths = readPaths(page);
-  // Glyph boxes come from Font Helper; an older Font Helper doesn't send them.
+  // Glyph boxes come from Figma Friend; an older Figma Friend doesn't send them.
   for (const lp of plan.lines) {
     if (lp.reason) continue;
     const noBox = lp.line.glyphs.some((g, gi) => {
       const fig = a.fonts.get(g.font)?.glyphs.get(g.code);
       return fig && fig.urx - fig.llx > 0 && !plan.fonts.get(lp.glyphFont[gi])?.prepared?.glyphs?.[lp.glyphEntry[gi]]?.box;
     });
-    if (noBox) lp.reason = "Font Helper needs updating";
+    if (noBox) lp.reason = "Figma Friend needs updating";
   }
   const lines = plan.lines.map((lp) => lp.line);
 

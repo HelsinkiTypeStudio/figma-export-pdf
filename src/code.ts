@@ -1,7 +1,7 @@
 // figma-export-pdf, Figma side. Choosing the plugin starts the export straight away: no
 // window, no button, and nothing in your file changes. Each frame or slide is exported once
 // with Figma's own PDF export, whose hidden text layer gives every glyph's exact position.
-// The plugin's hidden window (ui.ts) asks Font Helper for the fonts, swaps Figma's letter
+// The plugin's hidden window (ui.ts) asks Figma Friend for the fonts, swaps Figma's letter
 // outlines for real text and saves the PDF. Progress shows at the bottom of the screen.
 import { solidFill } from "./fills";
 import type { PageJob, TextInfo, ToMain, ToUI } from "./types";

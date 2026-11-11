@@ -8,7 +8,7 @@ Works in Figma Design and Figma Slides.
 
 ## You need
 
-- [Font Helper](https://github.com/HelsinkiTypeStudio/font-helper) running in your menu bar. It hands the installed font files to the plugin. Without it, the plugin still exports, but all text stays as outlines.
+- [Figma Friend](https://github.com/HelsinkiTypeStudio/font-helper) running in your menu bar. It hands the installed font files to the plugin. Without it, the plugin still exports, but all text stays as outlines.
 - The Figma desktop app.
 
 ## Install
@@ -25,7 +25,7 @@ In Figma: **Plugins → Development → Import plugin from manifest…** and cho
 ## Use
 
 1. In Slides, nothing needs selecting: every slide is exported. In Design, select the frames to export, or nothing for every top-level frame on the page.
-2. Choose **Export PDF optimised for presentations** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Font Helper asks whether to allow the plugin.
+2. Choose **Export PDF optimised for presentations** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Figma Friend asks whether to allow the plugin.
 3. Choose where to save. The dialog opens in the folder you used last.
 
 A progress bar shows at the bottom of the screen. At the end it says "PDF saved", or "Export failed" with a **Details** button. Which text stayed as outlines, and why, is written to the plugin console (Plugins › Development › Show/Hide Console).
@@ -35,7 +35,7 @@ A progress bar shows at the bottom of the screen. At the end it says "PDF saved"
 Nothing in your file changes, and nothing is copied. Each frame or slide is exported once, with Figma's own PDF export:
 
 1. Figma's PDF holds, besides the letter outlines, an invisible text layer that records the exact position, size and characters of every glyph, plus each glyph's width and box.
-2. Each line of that layer is matched to the text layer it came from. **Font Helper** checks every glyph against the installed font file, fixed at the variable font axis values Figma used: the width and the left, bottom and right edges must agree within one font unit.
+2. Each line of that layer is matched to the text layer it came from. **Figma Friend** checks every glyph against the installed font file, fixed at the variable font axis values Figma used: the width and the left, bottom and right edges must agree within one font unit.
 3. For the lines that passed, the plugin finds their letter outlines in Figma's PDF (each outline must sit inside its glyph's box, in the line's own colour) and takes them out. A line whose outlines can't all be found stays as it is.
 4. Those lines are written back as real text, glyph by glyph at Figma's positions, with Figma's own widths and the characters from Figma's character map, so copy and paste gives the same text as Figma's export.
 

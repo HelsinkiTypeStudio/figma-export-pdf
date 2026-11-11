@@ -1,5 +1,5 @@
 // figma-export-pdf, the plugin's hidden window: reads Figma's export of each page, asks
-// Font Helper for the fonts, swaps the letter outlines for real text and saves the PDF.
+// Figma Friend for the fonts, swaps the letter outlines for real text and saves the PDF.
 // It only shows itself if you ask for the details at the end.
 import { PDFDocument } from "pdf-lib";
 import { readExportA } from "./pdf/figma-a";
@@ -25,17 +25,17 @@ let started = 0;
 /** Where the time went, shown under Details. */
 let timing: string[] = [];
 
-/** Checks Font Helper is running and allows this plugin. Returns why not, if it can't be used. */
+/** Checks Figma Friend is running and allows this plugin. Returns why not, if it can't be used. */
 async function checkHelper(): Promise<string | null> {
   let s = await helper.status();
-  if (s === "offline") return "Font Helper isn't running. Open it from Applications and try again.";
+  if (s === "offline") return "Figma Friend isn't running. Open it from Applications and try again.";
   if (s === "unpaired") {
-    send({ type: "status", text: "Click Allow in Font Helper's window" });
+    send({ type: "status", text: "Click Allow in Figma Friend's window" });
     const ok = await helper.pair().catch(() => false);
-    if (!ok) return "Font Helper didn't allow this plugin.";
+    if (!ok) return "Figma Friend didn't allow this plugin.";
     s = await helper.status();
   }
-  return s === "ok" ? null : "Font Helper didn't accept this plugin's key. Try again.";
+  return s === "ok" ? null : "Figma Friend didn't accept this plugin's key. Try again.";
 }
 
 async function onPage(job: PageJob) {
@@ -112,7 +112,7 @@ async function onDone() {
   }
   const t1 = Date.now();
   out.setTitle(fileName);
-  out.setProducer("figma-export-pdf with Font Helper");
+  out.setProducer("figma-export-pdf with Figma Friend");
   out.setCreator("Figma");
   const bytes = await out.save({ useObjectStreams: true, objectsPerTick: Infinity });
   timing.push(`joining pages ${((t1 - t0) / 1000).toFixed(1)} s, writing the file ${((Date.now() - t1) / 1000).toFixed(1)} s`);

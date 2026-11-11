@@ -13,6 +13,6 @@
     "allowedDomains": [
       "http://localhost:7337"
     ],
-    "reasoning": "Font Helper, a menu bar app on your own Mac, serves the installed font files so the PDF can carry real text in your fonts."
+    "reasoning": "Figma Friend, a menu bar app on your own Mac, serves the installed font files so the PDF can carry real text in your fonts."
   }
 }
