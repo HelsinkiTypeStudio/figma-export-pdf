@@ -28,7 +28,7 @@ In Figma: **Plugins → Development → Import plugin from manifest…** and cho
 2. Choose **Export PDF with Real Text** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Font Helper asks whether to allow the plugin.
 3. Choose where to save. The dialog opens in the folder you used last.
 
-The last message has a **Details** button that lists which text stayed as Figma's outlines, and why.
+A progress bar shows at the bottom of the screen. At the end it says "PDF saved", or "Export failed" with a **Details** button. Which text stayed as outlines, and why, is written to the plugin console (Plugins › Development › Show/Hide Console).
 
 ## How it works
 

@@ -21,7 +21,6 @@ interface PageState {
 
 let pages: PageState[] = [];
 let fileName = "Export";
-let count = 0;
 let started = 0;
 /** Where the time went, shown under Details. */
 let timing: string[] = [];
@@ -31,7 +30,7 @@ async function checkHelper(): Promise<string | null> {
   let s = await helper.status();
   if (s === "offline") return "Font Helper isn't running. Open it from Applications and try again.";
   if (s === "unpaired") {
-    send({ type: "status", text: "Font Helper is asking whether to allow this plugin. Click Allow in its window." });
+    send({ type: "status", text: "Click Allow in Font Helper's window" });
     const ok = await helper.pair().catch(() => false);
     if (!ok) return "Font Helper didn't allow this plugin.";
     s = await helper.status();
@@ -49,7 +48,6 @@ async function onPage(job: PageJob) {
     const plan = planPage(a, job.texts);
     st.plan = plan;
     for (const fp of plan.fonts.values()) {
-      send({ type: "status", text: `Page ${job.index + 1} of ${count}: reading ${fp.request.family} ${fp.request.style}…` });
       fp.prepared = await helper.prepare(fp.request);
     }
     finishPlan(plan);
@@ -109,31 +107,22 @@ async function onDone() {
   const out = await PDFDocument.create();
   for (const p of pages) {
     if (!p) continue;
-    send({ type: "status", text: `Putting the PDF together: page ${p.job.index + 1} of ${count}…` });
     const [page] = await out.copyPages(p.result, [0]);
     out.addPage(page);
   }
-  send({ type: "status", text: "Writing the PDF file…" });
   const t1 = Date.now();
   out.setTitle(fileName);
   out.setProducer("figma-export-pdf with Font Helper");
   out.setCreator("Figma");
   const bytes = await out.save({ useObjectStreams: true, objectsPerTick: Infinity });
-  const mb = (bytes.length / 1024 / 1024).toFixed(1);
   timing.push(`joining pages ${((t1 - t0) / 1000).toFixed(1)} s, writing the file ${((Date.now() - t1) / 1000).toFixed(1)} s`);
-  const seconds = Math.round((Date.now() - started) / 1000);
-  send({ type: "status", text: `Ready (${mb} MB, ${seconds} s). Choose where to save it.` });
+  send({ type: "status", text: "Choose where to save the PDF", fraction: 1 });
   const t2 = Date.now();
   const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
   timing.push(`saving ${((Date.now() - t2) / 1000).toFixed(1)} s (dialog and making it smaller included)`);
-  const { written, total } = counts();
-  if (saved) {
-    const savedMb = (saved.bytes / 1024 / 1024).toFixed(1);
-    const size = saved.bytes < bytes.length ? `${savedMb} MB, made smaller from ${mb} MB` : `${mb} MB`;
-    send({ type: "finished", message: `Saved ${saved.path.split("/").pop()} (${size}). ${written} of ${total} lines are real text.`, report: report() });
-  } else {
-    send({ type: "finished", message: "Not saved.", report: "" });
-  }
+  // The details stay in the plugin console for anyone who wants them.
+  console.log(report());
+  send({ type: "finished", message: saved ? "PDF saved" : "PDF not saved", report: "" });
 }
 
 function showDetails(text: string) {
@@ -150,7 +139,6 @@ window.onmessage = async (ev: MessageEvent) => {
         helper.key = m.key;
         pages = [];
         fileName = m.fileName;
-        count = m.count;
         started = Date.now();
         timing = [];
         pageMs = 0;
@@ -170,7 +158,7 @@ window.onmessage = async (ev: MessageEvent) => {
         break;
     }
   } catch (e) {
-    send({ type: "finished", message: `Export failed: ${(e as Error).message}`, report: "", error: true });
+    send({ type: "finished", message: "Export failed", report: (e as Error).message, error: true });
   }
 };
 

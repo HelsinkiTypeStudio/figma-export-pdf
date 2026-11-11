@@ -25,8 +25,20 @@ function say(text: string, options: NotificationOptions = {}) {
   old?.cancel();
 }
 
-function progress(text: string) {
-  say(text, {
+let label = "Exporting";
+let fraction = 0;
+
+/** A text progress bar, since the message at the bottom of the screen can only show text. */
+function bar(f: number): string {
+  const n = 20, full = Math.round(Math.max(0, Math.min(1, f)) * n);
+  return "█".repeat(full) + "░".repeat(n - full);
+}
+
+/** Shows the progress bar, with a new label or how far along it is. */
+function progress(f: number = fraction, text: string = label) {
+  fraction = f;
+  label = text;
+  say(`${label}   ${bar(fraction)}`, {
     timeout: Infinity,
     button: { text: "Cancel", action: () => { cancelled = true; finish("Export cancelled."); return true; } },
   });
@@ -34,7 +46,7 @@ function progress(text: string) {
 
 let closing = false;
 
-/** Ends the run: closes the plugin once the last message has gone. */
+/** Ends the run with a short message (and, when it failed, a Details button); the plugin closes once the message has gone. */
 function finish(message: string, report = "", error = false) {
   if (closing) return;
   closing = true;
@@ -240,7 +252,7 @@ figma.ui.onmessage = async (m: ToMain) => {
       pageDone?.();
       break;
     case "status":
-      if (!cancelled && !closing) progress(m.text);
+      if (!cancelled && !closing) progress(m.fraction ?? fraction, m.text ?? label);
       break;
     case "finished":
       finish(m.message, m.report, m.error);
@@ -254,23 +266,22 @@ figma.ui.onmessage = async (m: ToMain) => {
 async function run() {
   const roots = pickRoots().filter((n) => "exportAsync" in n);
   if (!roots.length) {
-    finish(figma.editorType === "slides" ? "There are no slides to export." : "Select one or more frames to export.", "", true);
+    finish(figma.editorType === "slides" ? "There are no slides to export" : "Select one or more frames to export", "", true);
     return;
   }
   const fileName = (figma.editorType === "slides" || roots.length > 1 ? figma.root.name : roots[0].name) || "Export";
-  const what = figma.editorType === "slides" ? "slide" : "frame";
-  progress(`Exporting ${roots.length} ${what}${roots.length === 1 ? "" : "s"}…`);
+  progress(0, "Exporting");
 
   const key = ((await figma.clientStorage.getAsync(KEY)) as string | undefined) ?? null;
   const answer = await new Promise<ToMain>((resolve) => {
     uiReady = resolve;
     post({ type: "init", key, count: roots.length, fileName });
   });
-  if (answer.type === "stop") { finish(answer.message, "", true); return; }
+  if (answer.type === "stop") { finish("Export failed", answer.message, true); return; }
 
   for (let i = 0; i < roots.length && !cancelled; i++) {
     const root = roots[i];
-    progress(`Exporting ${what} ${i + 1} of ${roots.length}…`);
+    progress((0.9 * i) / roots.length, "Exporting");
     const origin = root.absoluteBoundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const { texts } = survey(root);
     const a = await root.exportAsync({ format: "PDF" });
@@ -284,9 +295,9 @@ async function run() {
     });
   }
   if (!cancelled) {
-    progress("Putting the PDF together…");
+    progress(0.9);
     post({ type: "done" });
   }
 }
 
-run().catch((e) => finish(`Export failed: ${errText(e)}`, "", true));
+run().catch((e) => finish("Export failed", errText(e), true));
