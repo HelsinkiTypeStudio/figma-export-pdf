@@ -28,10 +28,12 @@ function say(text: string, options: NotificationOptions = {}) {
 let label = "Exporting";
 let fraction = 0;
 
-/** A text progress bar, since the message at the bottom of the screen can only show text. */
+let pageCount = 1;
+
+/** A text progress bar, one circle per page, since the message at the bottom of the screen can only show text. */
 function bar(f: number): string {
-  const n = 20, full = Math.round(Math.max(0, Math.min(1, f)) * n);
-  return "█".repeat(full) + "░".repeat(n - full);
+  const full = Math.round(Math.max(0, Math.min(1, f)) * pageCount);
+  return "●".repeat(full) + "○".repeat(pageCount - full);
 }
 
 /** Shows the progress bar, with a new label or how far along it is. */
@@ -270,6 +272,7 @@ async function run() {
     return;
   }
   const fileName = (figma.editorType === "slides" || roots.length > 1 ? figma.root.name : roots[0].name) || "Export";
+  pageCount = roots.length;
   progress(0, "Exporting");
 
   const key = ((await figma.clientStorage.getAsync(KEY)) as string | undefined) ?? null;
@@ -281,7 +284,7 @@ async function run() {
 
   for (let i = 0; i < roots.length && !cancelled; i++) {
     const root = roots[i];
-    progress((0.9 * i) / roots.length, "Exporting");
+    progress(i / roots.length, "Exporting");
     const origin = root.absoluteBoundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
     const { texts } = survey(root);
     const a = await root.exportAsync({ format: "PDF" });
@@ -295,7 +298,7 @@ async function run() {
     });
   }
   if (!cancelled) {
-    progress(0.9);
+    progress(1);
     post({ type: "done" });
   }
 }
