@@ -23,6 +23,8 @@ let pages: PageState[] = [];
 let fileName = "Export";
 let count = 0;
 let started = 0;
+/** Where the time went, shown under Details. */
+let timing: string[] = [];
 
 /** Checks Font Helper is running and allows this plugin. Returns why not, if it can't be used. */
 async function checkHelper(): Promise<string | null> {
@@ -38,6 +40,7 @@ async function checkHelper(): Promise<string | null> {
 }
 
 async function onPage(job: PageJob) {
+  const t = Date.now();
   const aDoc = await PDFDocument.load(job.a, { updateMetadata: false, parseSpeed: Infinity });
   const st: PageState = { job, result: aDoc };
   pages[job.index] = st;
@@ -57,7 +60,9 @@ async function onPage(job: PageJob) {
     st.note = `page kept as Figma exported it: ${(e as Error).message}`;
     for (const lp of st.plan?.lines ?? []) if (!lp.reason) lp.reason = "page kept as Figma exported it";
   }
+  pageMs += Date.now() - t;
 }
+let pageMs = 0;
 
 function counts(): { written: number; total: number } {
   let written = 0, total = 0;
@@ -94,24 +99,33 @@ function report(): string {
       out.push(`• ${r} (${list.slice(0, 3).join("; ")}${list.length > 3 ? `; and ${list.length - 3} more` : ""})`);
     }
   }
+  if (timing.length) out.push("", "Time: " + timing.join("; ") + ".");
   return out.join("\n");
 }
 
 async function onDone() {
+  timing.push(`exporting ${((Date.now() - started - pageMs) / 1000).toFixed(1)} s, fonts and real text ${(pageMs / 1000).toFixed(1)} s`);
+  const t0 = Date.now();
   const out = await PDFDocument.create();
   for (const p of pages) {
     if (!p) continue;
+    send({ type: "status", text: `Putting the PDF together: page ${p.job.index + 1} of ${count}…` });
     const [page] = await out.copyPages(p.result, [0]);
     out.addPage(page);
   }
+  send({ type: "status", text: "Writing the PDF file…" });
+  const t1 = Date.now();
   out.setTitle(fileName);
   out.setProducer("figma-export-pdf with Font Helper");
   out.setCreator("Figma");
   const bytes = await out.save({ useObjectStreams: true, objectsPerTick: Infinity });
   const mb = (bytes.length / 1024 / 1024).toFixed(1);
+  timing.push(`joining pages ${((t1 - t0) / 1000).toFixed(1)} s, writing the file ${((Date.now() - t1) / 1000).toFixed(1)} s`);
   const seconds = Math.round((Date.now() - started) / 1000);
   send({ type: "status", text: `Ready (${mb} MB, ${seconds} s). Choose where to save it.` });
+  const t2 = Date.now();
   const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
+  timing.push(`saving ${((Date.now() - t2) / 1000).toFixed(1)} s (dialog included)`);
   const { written, total } = counts();
   if (saved) {
     send({ type: "finished", message: `Saved ${saved.split("/").pop()} (${mb} MB). ${written} of ${total} lines are real text.`, report: report() });
@@ -136,6 +150,8 @@ window.onmessage = async (ev: MessageEvent) => {
         fileName = m.fileName;
         count = m.count;
         started = Date.now();
+        timing = [];
+        pageMs = 0;
         const problem = await checkHelper();
         send(problem ? { type: "stop", message: problem } : { type: "go" });
         break;
