@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 16px; font: 12px/1.5 Inter, system-ui, sans-serif;
+    color: var(--figma-color-text, #222); background: var(--figma-color-bg, #fff);
+  }
+  h1 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--figma-color-text-secondary, #666); }
+  button {
+    width: 100%; padding: 8px; border: 0; border-radius: 6px; font: inherit; font-weight: 600;
+    background: var(--figma-color-bg-brand, #0d99ff); color: var(--figma-color-text-onbrand, #fff); cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { margin: 12px 0 0; min-height: 18px; }
+  #status.ok { color: var(--figma-color-text-success, #14ae5c); }
+  #status.bad { color: var(--figma-color-text-danger, #f24822); }
+  #report { white-space: pre-wrap; margin-top: 12px; color: var(--figma-color-text-secondary, #666); }
+</style>
+</head>
+<body>
+  <h1>Export PDF with real text</h1>
+  <p>Exports the selected frames or slides (or all of them) as one PDF. Text in your installed fonts becomes real, selectable text. Everything else looks exactly as in Figma's own export.</p>
+  <button id="export">Export PDF</button>
+  <div id="status"></div>
+  <div id="report"></div>
+  <script>/*UI_SCRIPT*/</script>
+</body>
+</html>
