@@ -1,11 +1,13 @@
-// Builds the final page: export B (Figma's PDF with the checked text's fill cleared) plus
-// that text written back as real text, glyph by glyph, at export A's exact positions.
+// Builds the final page from export A (Figma's own PDF): the letter outlines of the checked
+// text come out, and that text goes back in as real text, glyph by glyph, at Figma's exact
+// positions. Everything else Figma drew stays as it was.
 import {
-  PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFObjectCopier, PDFRef, PDFString,
+  PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFObject, PDFRawStream, PDFRef, PDFString,
 } from "pdf-lib";
 import type { ExportA, HiddenLine } from "./figma-a";
-import { lex, literal, matrixString, fmt } from "./lexer";
-import { asDict, dictGet, fromLatin1, lookup, pageContent, pageResources } from "./objects";
+import { lex, literal, matrixString, fmt, Matrix, IDENTITY, multiply, apply } from "./lexer";
+import { asDict, asNumbers, dictGet, fromLatin1, latin1, lookup, pageContent, pageResources, streamBytes } from "./objects";
+import { readPaths, assignContours, removeContours, Contour, GlyphBox, Scope, Rect } from "./outlines";
 import type { FontPlan, LinePlan, PagePlan } from "../plan";
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -31,26 +33,20 @@ function subsetTag(): string {
   return t;
 }
 
-/** Removes every BT ... ET block from a content stream: Figma's hidden text, all of which is written again. */
-export function stripTextBlocks(content: string): string {
-  const tokens = lex(content);
-  let out = "";
-  let last = 0;
+/** Byte ranges of every BT ... ET block: Figma's hidden text, all of which is written again. */
+export function textBlocks(content: string): [number, number][] {
+  const out: [number, number][] = [];
   let depth = 0;
   let start = -1;
-  for (const t of tokens) {
+  for (const t of lex(content)) {
     if (t.kind === "arrayStart") depth++;
     else if (t.kind === "arrayEnd") depth--;
     else if (t.kind === "op" && depth === 0) {
       if (t.value === "BT" && start < 0) start = t.start;
-      else if (t.value === "ET" && start >= 0) {
-        out += content.slice(last, start);
-        last = t.end;
-        start = -1;
-      }
+      else if (t.value === "ET" && start >= 0) { out.push([start, t.end]); start = -1; }
     }
   }
-  return out + content.slice(last);
+  return out;
 }
 
 interface EmbeddedFont {
@@ -219,44 +215,24 @@ function hiddenLine(line: HiddenLine, rename: Map<string, string>): string {
 }
 
 export interface AssembleResult {
-  doc: PDFDocument;
   written: number;
   kept: number;
 }
 
 /**
- * Writes the plan into export B. `b` is null when Figma refused to export B because nothing
- * visible was left (a selection made only of text); a blank page is used then.
+ * Turns export A into the final page, in place: the letter outlines of the lines that
+ * passed every check come out, and those lines go back in as real text. Lines that stay as
+ * outlines keep Figma's invisible text, so they still select and copy.
  */
-export async function assemblePage(aDoc: PDFDocument, a: ExportA, b: Uint8Array | null, plan: PagePlan): Promise<AssembleResult> {
-  let doc: PDFDocument;
-  if (b) {
-    doc = await PDFDocument.load(b, { updateMetadata: false });
-    const { width, height } = doc.getPage(0).getSize();
-    if (Math.abs(width - a.width) > 0.01 || Math.abs(height - a.height) > 0.01) {
-      throw new Error(`the two exports differ in page size (${width}×${height} and ${a.width}×${a.height})`);
-    }
-  } else {
-    doc = await PDFDocument.create({ updateMetadata: false });
-    doc.addPage([a.width, a.height]);
-  }
+export function assemblePage(doc: PDFDocument, a: ExportA, plan: PagePlan): AssembleResult {
   const page = doc.getPage(0);
+  const content = pageContent(doc, page);
   const res = pageResources(doc, page);
+  const scopes = new Map<Scope, PDFRef>();
+  const pageScope = makeScope(doc, content, res, countForms(doc, content, res), scopes);
+  const remove = takeOutlines(pageScope, a, plan);
   const fontDict = ensureDict(doc, res, "Font");
 
-  // Colour space for the text colour: the same one Figma uses for fills.
-  let colorSpace = a.colorSpace;
-  if (colorSpace) {
-    const csDict = ensureDict(doc, res, "ColorSpace");
-    if (!csDict.get(PDFName.of(colorSpace))) {
-      const aRes = pageResources(aDoc, aDoc.getPage(0));
-      const src = asDict(dictGet(aDoc, aRes, "ColorSpace"))?.get(PDFName.of(colorSpace));
-      if (src) csDict.set(PDFName.of(colorSpace), PDFObjectCopier.for(aDoc.context, doc.context).copy(src));
-      else colorSpace = undefined;
-    }
-  }
-
-  // Fonts from Font Helper for the lines written as real text.
   const writtenLines = plan.lines.filter((lp) => !lp.reason);
   const embedded = new Map<string, EmbeddedFont>();
   for (const lp of writtenLines) {
@@ -265,34 +241,210 @@ export async function assemblePage(aDoc: PDFDocument, a: ExportA, b: Uint8Array 
       embedded.set(key, embedFont(doc, plan.fonts.get(key)!, freeName(fontDict, "R")));
     }
   }
-
-  // Figma's invisible fonts for the lines that stay as outlines.
-  const rename = new Map<string, string>();
-  const keptLines = plan.lines.filter((lp) => lp.reason);
-  if (keptLines.length) {
-    const aFonts = asDict(dictGet(aDoc, pageResources(aDoc, aDoc.getPage(0)), "Font"));
-    const copier = PDFObjectCopier.for(aDoc.context, doc.context);
-    for (const lp of keptLines) {
-      for (const part of lp.line.parts) {
-        if (part.kind !== "font" || rename.has(part.name)) continue;
-        const src = aFonts?.get(PDFName.of(part.name));
-        if (!src) continue;
-        const n = freeName(fontDict, "FigmaGlyphs");
-        const copied = src instanceof PDFRef ? copier.copy(lookup(aDoc, src)!) : copier.copy(src);
-        fontDict.set(PDFName.of(n), copied instanceof PDFRef ? copied : doc.context.register(copied));
-        rename.set(part.name, n);
-      }
-    }
-  }
+  const colorSpace = a.colorSpace && asDict(dictGet(doc, res, "ColorSpace"))?.get(PDFName.of(a.colorSpace)) ? a.colorSpace : undefined;
 
   let text = "";
-  for (const lp of plan.lines) {
-    text += lp.reason ? hiddenLine(lp.line, rename) : realLine(lp, embedded, colorSpace);
+  for (const lp of plan.lines) text += lp.reason ? hiddenLine(lp.line, new Map()) : realLine(lp, embedded, colorSpace);
+  const changed = removeContours(remove, pageScope, textBlocks(content));
+  for (const [scope, kept] of changed) {
+    if (scope === pageScope) continue;
+    replaceStream(doc, scopes.get(scope)!, kept);
   }
-
-  const original = b ? stripTextBlocks(pageContent(doc, page)) : "";
-  const content = `q\n${original}\nQ\n${text}`;
-  page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(fromLatin1(content))));
-  return { doc, written: writtenLines.length, kept: keptLines.length };
+  const out = `q\n${changed.get(pageScope)}\nQ\n${text}`;
+  // The old content streams would stay in the file unused, so they go.
+  const old = page.node.get(PDFName.of("Contents"));
+  const oldRefs: PDFRef[] = old instanceof PDFRef ? [old] : [];
+  const oldArray = lookup(doc, old);
+  if (oldArray instanceof PDFArray) for (let i = 0; i < oldArray.size(); i++) { const r = oldArray.get(i); if (r instanceof PDFRef) oldRefs.push(r); }
+  page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(fromLatin1(out))));
+  for (const r of oldRefs) doc.context.delete(r);
+  return { written: writtenLines.length, kept: plan.lines.length - writtenLines.length };
 }
 
+/** Gives a form new content, keeping everything else about it. */
+function replaceStream(doc: PDFDocument, ref: PDFRef, content: string) {
+  const old = doc.context.lookup(ref) as PDFRawStream;
+  const fresh = doc.context.flateStream(fromLatin1(content));
+  for (const [k, v] of old.dict.entries()) {
+    const key = k.decodeText();
+    if (key === "Length" || key === "Filter" || key === "DecodeParms") continue;
+    fresh.dict.set(k, v);
+  }
+  doc.context.assign(ref, fresh);
+}
+
+function names(content: string, op: string): string[] {
+  const out: string[] = [];
+  let name = "";
+  for (const t of lex(content)) {
+    if (t.kind === "name") name = t.value;
+    else if (t.kind === "op") { if (t.value === op && name) out.push(name); name = ""; }
+    else name = "";
+  }
+  return out;
+}
+
+function formOf(doc: PDFDocument, res: PDFDict, name: string): { ref: PDFRef; stream: PDFRawStream } | undefined {
+  const ref = asDict(dictGet(doc, res, "XObject"))?.get(PDFName.of(name));
+  if (!(ref instanceof PDFRef)) return undefined;
+  const stream = doc.context.lookup(ref);
+  if (!(stream instanceof PDFRawStream)) return undefined;
+  if (stream.dict.get(PDFName.of("Subtype"))?.toString() !== "/Form") return undefined;
+  return { ref, stream };
+}
+
+function formResources(doc: PDFDocument, stream: PDFRawStream, parent: PDFDict): PDFDict {
+  return asDict(lookup(doc, stream.dict.get(PDFName.of("Resources")))) ?? parent;
+}
+
+/** How many times each form is drawn, counting forms inside forms. */
+function countForms(doc: PDFDocument, content: string, res: PDFDict, counts = new Map<string, number>(), depth = 0): Map<string, number> {
+  for (const n of names(content, "Do")) {
+    const f = formOf(doc, res, n);
+    if (!f) continue;
+    const key = f.ref.toString();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (counts.get(key) === 1 && depth < 4) {
+      countForms(doc, latin1(streamBytes(f.stream)), formResources(doc, f.stream, res), counts, depth + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * The rectangle an alpha mask lets through, when the mask is nothing but one opaque
+ * rectangle: Figma clips slides and frames this way. Anything else gives undefined.
+ */
+function maskRect(doc: PDFDocument, mask: PDFDict): Rect | undefined {
+  if (dictGet(doc, mask, "S")?.toString() !== "/Alpha") return undefined;
+  const tr = dictGet(doc, mask, "TR");
+  if (tr && tr.toString() !== "/Identity") return undefined;
+  const g = dictGet(doc, mask, "G");
+  if (!(g instanceof PDFRawStream)) return undefined;
+  let m: Matrix = IDENTITY;
+  const fm = asNumbers(doc, g.dict.get(PDFName.of("Matrix")));
+  if (fm.length === 6) m = fm as Matrix;
+  const stack: Matrix[] = [];
+  const pts: [number, number][] = [];
+  let nums: number[] = [];
+  let fills = 0;
+  let curves = 0;
+  for (const t of lex(latin1(streamBytes(g)))) {
+    if (t.kind === "num") { nums.push(t.value); continue; }
+    if (t.kind === "name") continue;
+    if (t.kind !== "op") return undefined;
+    switch (t.value) {
+      case "q": stack.push(m); break;
+      case "Q": m = stack.pop() ?? IDENTITY; break;
+      case "cm": m = multiply(nums.slice(-6) as Matrix, m); break;
+      case "cs": case "scn": case "sc": case "g": case "rg": case "n": case "h": break;
+      case "m": case "l": pts.push(apply(m, nums[0], nums[1])); break;
+      case "f": case "f*": fills++; break;
+      case "c": case "v": case "y": curves++; break;
+      default: return undefined;
+    }
+    nums = [];
+  }
+  if (fills !== 1 || curves || pts.length < 4 || pts.length > 5) return undefined;
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const r = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  // Only a rectangle: every corner on the box's edges in both directions.
+  if (!pts.every(([x, y]) => (Math.abs(x - r.x0) < 0.01 || Math.abs(x - r.x1) < 0.01) && (Math.abs(y - r.y0) < 0.01 || Math.abs(y - r.y1) < 0.01))) return undefined;
+  return r;
+}
+
+function isPlainState(o: PDFObject | undefined, doc: PDFDocument): boolean | Rect {
+  const d = asDict(lookup(doc, o));
+  if (!d) return false;
+  const ca = dictGet(doc, d, "ca");
+  if (ca instanceof PDFNumber && ca.asNumber() < 1) return false;
+  const bm = dictGet(doc, d, "BM");
+  if (bm instanceof PDFArray) { if (bm.size() !== 1 || !["/Normal", "/Compatible"].includes(lookup(doc, bm.get(0))!.toString())) return false; }
+  else if (bm && !["/Normal", "/Compatible"].includes(bm.toString())) return false;
+  const mask = dictGet(doc, d, "SMask");
+  if (mask && mask.toString() !== "/None") {
+    const md = asDict(mask);
+    return (md && maskRect(doc, md)) || false;
+  }
+  return true;
+}
+
+function makeScope(doc: PDFDocument, content: string, res: PDFDict, counts: Map<string, number>, refs: Map<Scope, PDFRef>): Scope {
+  const states = asDict(dictGet(doc, res, "ExtGState"));
+  const made = new Map<string, { scope: Scope; matrix: Matrix }>();
+  return {
+    content,
+    plainState: (name) => isPlainState(states?.get(PDFName.of(name)), doc),
+    form: (name) => {
+      if (made.has(name)) return undefined;   // drawn twice in this stream
+      const f = formOf(doc, res, name);
+      if (!f || counts.get(f.ref.toString()) !== 1) return undefined;
+      const m = asNumbers(doc, f.stream.dict.get(PDFName.of("Matrix")));
+      const scope = makeScope(doc, latin1(streamBytes(f.stream)), formResources(doc, f.stream, res), counts, refs);
+      refs.set(scope, f.ref);
+      const entry = { scope, matrix: (m.length === 6 ? m : IDENTITY) as Matrix };
+      made.set(name, entry);
+      return entry;
+    },
+  };
+}
+
+function sameColour(fill: number[], c: { r: number; g: number; b: number }): boolean {
+  return fill.length === 3 && Math.abs(fill[0] - c.r) < 0.002 && Math.abs(fill[1] - c.g) < 0.002 && Math.abs(fill[2] - c.b) < 0.002;
+}
+
+/**
+ * Finds the outlines of every line planned as real text. A line whose outlines can't all be
+ * found, or share a contour with another line that stays, is kept as outlines instead.
+ * Returns the contours to remove.
+ */
+function takeOutlines(page: Scope, a: ExportA, plan: PagePlan): Set<Contour> {
+  const paths = readPaths(page);
+  const lines = plan.lines.map((lp) => lp.line);
+
+  for (let round = 0; round < 5; round++) {
+    // Glyph boxes in each line's text space: exact boxes from the font file for lines
+    // planned as real text, generous ones (from Figma's numbers, 1 em tall) for the rest.
+    const boxes: (GlyphBox | null)[][] = plan.lines.map((lp, li) => lp.line.glyphs.map((g, gi) => {
+      const fig = a.fonts.get(g.font)?.glyphs.get(g.code);
+      if (!fig || fig.urx - fig.llx <= 0) return null;
+      if (!lp.reason) {
+        const fp = plan.fonts.get(lp.glyphFont[gi]);
+        const box = fp?.prepared?.glyphs?.[lp.glyphEntry[gi]]?.box;
+        if (!box) return null;
+        return { line: li, glyph: gi, x0: g.x + box[0] * g.size, y0: box[1] * g.size, x1: g.x + box[2] * g.size, y1: box[3] * g.size };
+      }
+      return { line: li, glyph: gi, x0: g.x + fig.llx * g.size, y0: Math.min(fig.lly, 0) * g.size, x1: g.x + fig.urx * g.size, y1: 1.2 * g.size };
+    }));
+    const hits = assignContours(paths, lines, boxes, 0.01);
+
+    const found = plan.lines.map((lp) => lp.line.glyphs.map(() => false));
+    const owned = new Map<number, Contour[]>();
+    const spoiled = new Set<number>();
+    for (const [c, bs] of hits) {
+      const linesHit = new Set(bs.map((b) => b.line));
+      const written = [...linesHit].filter((li) => !plan.lines[li].reason);
+      if (!written.length) continue;
+      const li = written[0];
+      if (linesHit.size > 1) { written.forEach((w) => spoiled.add(w)); continue; }
+      if (!sameColour(c.path.fill, plan.lines[li].fill!)) continue;
+      for (const b of bs) found[li][b.glyph] = true;
+      owned.set(li, (owned.get(li) ?? []).concat([c]));
+    }
+
+    let changed = false;
+    plan.lines.forEach((lp, li) => {
+      if (lp.reason) return;
+      if (spoiled.has(li)) { lp.reason = "overlaps other text that stays as outlines"; changed = true; return; }
+      const missing = boxes[li].some((b, gi) => b && !found[li][gi]);
+      if (missing) { lp.reason = "couldn't find its outlines in Figma's export"; changed = true; }
+    });
+    if (!changed) {
+      const remove = new Set<Contour>();
+      plan.lines.forEach((lp, li) => { if (!lp.reason) for (const c of owned.get(li) ?? []) remove.add(c); });
+      return remove;
+    }
+  }
+  for (const lp of plan.lines) if (!lp.reason) lp.reason = "couldn't find its outlines in Figma's export";
+  return new Set();
+}

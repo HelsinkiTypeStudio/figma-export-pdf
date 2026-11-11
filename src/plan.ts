@@ -1,7 +1,7 @@
 // Decides, line by line, which text becomes real text and which stays as Figma's outlines.
 import type { ExportA, FigmaGlyph, HiddenLine } from "./pdf/figma-a";
 import { matchLines, LineMatch } from "./match";
-import type { ClearRange, SolidFill, TextInfo } from "./types";
+import type { SolidFill, TextInfo } from "./types";
 
 /** What Font Helper answers for one font (see font-helper's fontwork.py). */
 export interface PreparedFont {
@@ -10,7 +10,7 @@ export interface PreparedFont {
   path?: string;
   format?: "TrueType" | "CFF";
   font?: string;            // base64
-  glyphs?: { gid: number | null; how: string; diff?: number }[];
+  glyphs?: { gid: number | null; how: string; diff?: number; box?: number[] | null }[];
   postScriptName?: string;
   upm?: number;
   ascent?: number;
@@ -50,7 +50,6 @@ export interface LinePlan {
 export interface PagePlan {
   lines: LinePlan[];
   fonts: Map<string, FontPlan>;
-  clear: ClearRange[];
 }
 
 function sameFill(a: SolidFill, b: SolidFill): boolean {
@@ -103,12 +102,11 @@ export function planPage(a: ExportA, texts: TextInfo[]): PagePlan {
       lp.glyphEntry.push(ei);
     });
   }
-  return { lines, fonts, clear: [] };
+  return { lines, fonts };
 }
 
 /** Step 2, after Font Helper has answered: keep only lines whose every glyph was found. */
 export function finishPlan(plan: PagePlan): void {
-  plan.clear = [];
   for (const lp of plan.lines) {
     if (lp.reason || !lp.match) continue;
     const missing: string[] = [];
@@ -123,8 +121,6 @@ export function finishPlan(plan: PagePlan): void {
     if (missing.length) {
       const fp = plan.fonts.get(lp.glyphFont[0])!;
       lp.reason = `letters that don't match ${fp.request.family} ${fp.request.style}: ${[...new Set(missing)].join(" ")}`;
-      continue;
     }
-    plan.clear.push({ id: lp.match.text.id, start: lp.match.start, end: lp.match.end });
   }
 }

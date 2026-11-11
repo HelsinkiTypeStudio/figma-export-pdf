@@ -24,20 +24,20 @@ In Figma: **Plugins → Development → Import plugin from manifest…** and cho
 
 ## Use
 
-1. Select the frames or slides to export. With nothing selected, it exports every slide (Slides) or every top-level frame on the page (Design).
-2. Run **Export PDF with Real Text** and click **Export PDF**. The first time, Font Helper asks whether to allow the plugin.
+1. In Slides, nothing needs selecting: every slide is exported. In Design, select the frames to export, or nothing for every top-level frame on the page.
+2. Choose **Export PDF with Real Text** from the Actions menu. It starts straight away, with no window; progress shows at the bottom of the screen. The first time, Font Helper asks whether to allow the plugin.
 3. Choose where to save. The dialog opens in the folder you used last.
 
-The plugin window then lists which text stayed as Figma's outlines, and why.
+The last message has a **Details** button that lists which text stayed as Figma's outlines, and why.
 
 ## How it works
 
-Your layers are never touched. For each frame or slide the plugin makes a temporary copy and exports it twice:
+Nothing in your file changes, and nothing is copied. Each frame or slide is exported once, with Figma's own PDF export:
 
-1. **Export A** is Figma's normal PDF. Besides the outlines, it holds an invisible text layer that records the exact position, size and characters of every glyph, plus each glyph's width and box.
+1. Figma's PDF holds, besides the letter outlines, an invisible text layer that records the exact position, size and characters of every glyph, plus each glyph's width and box.
 2. Each line of that layer is matched to the text layer it came from. **Font Helper** checks every glyph against the installed font file, fixed at the variable font axis values Figma used: the width and the left, bottom and right edges must agree within one font unit.
-3. **Export B** is made after clearing the fill of only the lines that passed. Figma still draws everything else exactly as before.
-4. The checked lines are written into export B as real text, glyph by glyph at export A's positions, with Figma's own widths and the characters from Figma's character map, so copy and paste gives the same text as Figma's export.
+3. For the lines that passed, the plugin finds their letter outlines in Figma's PDF (each outline must sit inside its glyph's box, in the line's own colour) and takes them out. A line whose outlines can't all be found stays as it is.
+4. Those lines are written back as real text, glyph by glyph at Figma's positions, with Figma's own widths and the characters from Figma's character map, so copy and paste gives the same text as Figma's export.
 
 ## What stays as outlines
 

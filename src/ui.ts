@@ -1,110 +1,83 @@
-// figma-export-pdf, plugin window side: reads Figma's exports, asks Font Helper for the
-// fonts, writes the real text and saves the PDF.
+// figma-export-pdf, the plugin's hidden window: reads Figma's export of each page, asks
+// Font Helper for the fonts, swaps the letter outlines for real text and saves the PDF.
+// It only shows itself if you ask for the details at the end.
 import { PDFDocument } from "pdf-lib";
-import { readExportA, ExportA } from "./pdf/figma-a";
+import { readExportA } from "./pdf/figma-a";
 import { assemblePage } from "./pdf/assemble";
 import { planPage, finishPlan, PagePlan } from "./plan";
 import { Helper } from "./helper";
 import type { PageJob, ToMain, ToUI } from "./types";
 
-const $ = (id: string) => document.getElementById(id)!;
 const send = (m: ToMain) => parent.postMessage({ pluginMessage: m }, "*");
 
 const helper = new Helper(null, (key) => send({ type: "set-key", key }));
 
 interface PageState {
   job: PageJob;
-  aDoc?: PDFDocument;
-  a?: ExportA;
   plan?: PagePlan;
-  result?: PDFDocument;
+  result: PDFDocument;
   note?: string;
 }
 
 let pages: PageState[] = [];
 let fileName = "Export";
+let count = 0;
 let started = 0;
 
-function setStatus(text: string, kind: "" | "ok" | "bad" = "") {
-  const el = $("status");
-  el.textContent = text;
-  el.className = kind;
-}
-
-function setBusy(busy: boolean) {
-  ($("export") as HTMLButtonElement).disabled = busy;
-}
-
-async function checkHelper(): Promise<boolean> {
+/** Checks Font Helper is running and allows this plugin. Returns why not, if it can't be used. */
+async function checkHelper(): Promise<string | null> {
   let s = await helper.status();
-  if (s === "offline") {
-    setStatus("Font Helper isn't running. Start it from Applications, then try again. Without it, all text stays as Figma's outlines.", "bad");
-    return false;
-  }
+  if (s === "offline") return "Font Helper isn't running. Open it from Applications and try again.";
   if (s === "unpaired") {
-    setStatus("Font Helper is asking whether to allow this plugin. Click Allow in its dialog.");
+    send({ type: "status", text: "Font Helper is asking whether to allow this plugin. Click Allow in its window." });
     const ok = await helper.pair().catch(() => false);
-    if (!ok) { setStatus("Font Helper didn't allow this plugin.", "bad"); return false; }
+    if (!ok) return "Font Helper didn't allow this plugin.";
     s = await helper.status();
   }
-  return s === "ok";
+  return s === "ok" ? null : "Font Helper didn't accept this plugin's key. Try again.";
 }
 
-async function onPageA(job: PageJob) {
-  const st: PageState = { job };
+async function onPage(job: PageJob) {
+  const aDoc = await PDFDocument.load(job.a, { updateMetadata: false });
+  const st: PageState = { job, result: aDoc };
   pages[job.index] = st;
-  let ranges: { id: string; start: number; end: number }[] = [];
   try {
-    st.aDoc = await PDFDocument.load(job.a, { updateMetadata: false });
-    st.a = readExportA(st.aDoc);
-    st.plan = planPage(st.a, job.texts);
-    for (const fp of st.plan.fonts.values()) {
-      setStatus(`${job.name}: checking ${fp.request.family} ${fp.request.style}…`);
+    const a = readExportA(aDoc);
+    const plan = planPage(a, job.texts);
+    st.plan = plan;
+    for (const fp of plan.fonts.values()) {
+      send({ type: "status", text: `Page ${job.index + 1} of ${count}: reading ${fp.request.family} ${fp.request.style}…` });
       fp.prepared = await helper.prepare(fp.request);
     }
-    finishPlan(st.plan);
-    ranges = st.plan.clear;
+    finishPlan(plan);
+    assemblePage(aDoc, a, plan);
   } catch (e) {
-    st.note = `kept as Figma exported it: ${(e as Error).message}`;
-    st.plan = undefined;
+    // Anything unexpected: this page stays exactly as Figma exported it.
+    st.result = await PDFDocument.load(job.a, { updateMetadata: false });
+    st.note = `page kept as Figma exported it: ${(e as Error).message}`;
+    for (const lp of st.plan?.lines ?? []) if (!lp.reason) lp.reason = "page kept as Figma exported it";
   }
-  send({ type: "clear", index: job.index, ranges });
 }
 
-async function onPageB(m: Extract<ToUI, { type: "page-b" }>) {
-  const st = pages[m.index];
-  if (!st.aDoc || !st.a || !st.plan) return;
-  try {
-    // A layer the Figma side couldn't change still has its outlines: keep its lines as outlines too.
-    if (m.failed.length) {
-      const failed = new Set(m.failed);
-      for (const lp of st.plan.lines) if (!lp.reason && lp.match && failed.has(lp.match.text.id)) lp.reason = "couldn't change the layer";
-    }
-    if (!st.plan.clear.length) { st.result = st.aDoc; return; }
-    if (!m.b && !m.nothingVisible) throw new Error(m.problem || "the second export failed");
-    const r = await assemblePage(st.aDoc, st.a, m.b, st.plan);
-    st.result = r.doc;
-  } catch (e) {
-    st.result = st.aDoc;
-    st.note = `kept as Figma exported it: ${(e as Error).message}`;
-    for (const lp of st.plan.lines) if (!lp.reason) lp.reason = "page kept as Figma exported it";
-  }
+function counts(): { written: number; total: number } {
+  let written = 0, total = 0;
+  for (const p of pages) for (const lp of p?.plan?.lines ?? []) { total++; if (!lp.reason) written++; }
+  return { written, total };
 }
 
 function report(): string {
-  let written = 0, kept = 0;
+  const { written, total } = counts();
   const reasons = new Map<string, Set<string>>();
   const fonts = new Set<string>();
   for (const p of pages) {
     if (!p) continue;
-    if (p.note) reasons.set(p.note, (reasons.get(p.note) ?? new Set()).add(p.job.name));
+    const page = `${p.job.index + 1} ${p.job.name}`;
+    if (p.note) reasons.set(p.note, (reasons.get(p.note) ?? new Set()).add(page));
     for (const lp of p.plan?.lines ?? []) {
       if (lp.reason) {
-        kept++;
-        const where = lp.match ? `${p.job.name}: ${lp.match.text.name}` : p.job.name;
+        const where = lp.match ? `${page}: ${lp.match.text.name}` : page;
         reasons.set(lp.reason, (reasons.get(lp.reason) ?? new Set()).add(where));
       } else {
-        written++;
         for (const k of new Set(lp.glyphFont)) {
           const r = p.plan!.fonts.get(k)!.request;
           fonts.add(`${r.family} ${r.style}`);
@@ -113,7 +86,7 @@ function report(): string {
     }
   }
   const out: string[] = [];
-  out.push(`${written} of ${written + kept} lines are real text${fonts.size ? ` in ${[...fonts].sort().join(", ")}` : ""}.`);
+  out.push(`${written} of ${total} lines are real text${fonts.size ? ` in ${[...fonts].sort().join(", ")}` : ""}.`);
   if (reasons.size) {
     out.push("", "Kept as Figma's outlines:");
     for (const [r, where] of reasons) {
@@ -125,72 +98,62 @@ function report(): string {
 }
 
 async function onDone() {
-  try {
-    setStatus("Putting the pages together…");
-    const out = await PDFDocument.create();
-    for (const p of pages) {
-      if (!p?.result) continue;
-      const [page] = await out.copyPages(p.result, [0]);
-      out.addPage(page);
-    }
-    out.setTitle(fileName);
-    out.setProducer("figma-export-pdf with Font Helper");
-    out.setCreator("Figma");
-    const bytes = await out.save({ useObjectStreams: true });
-    const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    setStatus(`Ready (${(bytes.length / 1024 / 1024).toFixed(1)} MB, ${seconds} s). Choose where to save it.`);
-    const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
-    $("report").textContent = report();
-    if (saved) {
-      setStatus(`Saved ${saved.split("/").pop()} (${(bytes.length / 1024 / 1024).toFixed(1)} MB).`, "ok");
-      send({ type: "notify", text: "PDF saved" });
-    } else {
-      setStatus("Not saved.");
-    }
-  } catch (e) {
-    setStatus(`Couldn't finish: ${(e as Error).message}`, "bad");
-  } finally {
-    setBusy(false);
+  const out = await PDFDocument.create();
+  for (const p of pages) {
+    if (!p) continue;
+    const [page] = await out.copyPages(p.result, [0]);
+    out.addPage(page);
   }
+  out.setTitle(fileName);
+  out.setProducer("figma-export-pdf with Font Helper");
+  out.setCreator("Figma");
+  const bytes = await out.save({ useObjectStreams: true });
+  const mb = (bytes.length / 1024 / 1024).toFixed(1);
+  const seconds = Math.round((Date.now() - started) / 1000);
+  send({ type: "status", text: `Ready (${mb} MB, ${seconds} s). Choose where to save it.` });
+  const saved = await helper.save(`${fileName.replace(/[\/:]/g, "-")}.pdf`, bytes);
+  const { written, total } = counts();
+  if (saved) {
+    send({ type: "finished", message: `Saved ${saved.split("/").pop()} (${mb} MB). ${written} of ${total} lines are real text.`, report: report() });
+  } else {
+    send({ type: "finished", message: "Not saved.", report: "" });
+  }
+}
+
+function showDetails(text: string) {
+  document.getElementById("report")!.textContent = text;
+  document.body.hidden = false;
 }
 
 window.onmessage = async (ev: MessageEvent) => {
   const m = ev.data.pluginMessage as ToUI | undefined;
   if (!m) return;
-  switch (m.type) {
-    case "key":
-      helper.key = m.key;
-      break;
-    case "start":
-      pages = [];
-      fileName = m.fileName;
-      setStatus(`Exporting ${m.count} ${m.count === 1 ? "page" : "pages"}…`);
-      break;
-    case "progress":
-      setStatus(m.text);
-      break;
-    case "page-a":
-      await onPageA(m.job);
-      break;
-    case "page-b":
-      await onPageB(m);
-      break;
-    case "done":
-      await onDone();
-      break;
-    case "error":
-      setStatus(m.message, "bad");
-      setBusy(false);
-      break;
+  try {
+    switch (m.type) {
+      case "init": {
+        helper.key = m.key;
+        pages = [];
+        fileName = m.fileName;
+        count = m.count;
+        started = Date.now();
+        const problem = await checkHelper();
+        send(problem ? { type: "stop", message: problem } : { type: "go" });
+        break;
+      }
+      case "page":
+        await onPage(m.job);
+        send({ type: "page-done" });
+        break;
+      case "done":
+        await onDone();
+        break;
+      case "details":
+        showDetails(m.report);
+        break;
+    }
+  } catch (e) {
+    send({ type: "finished", message: `Export failed: ${(e as Error).message}`, report: "", error: true });
   }
 };
 
-$("export").onclick = async () => {
-  setBusy(true);
-  $("report").textContent = "";
-  started = Date.now();
-  if (!(await checkHelper())) { setBusy(false); return; }
-  send({ type: "run" });
-};
-
-send({ type: "get-key" });
+document.getElementById("close")!.onclick = () => send({ type: "close" });

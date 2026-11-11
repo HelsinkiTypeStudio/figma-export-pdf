@@ -1,47 +1,60 @@
-// figma-export-pdf, Figma side. It never changes your layers: each frame or slide is
-// copied, the copy is exported twice and then deleted.
-//   Export A: Figma's own PDF, whose hidden text layer gives every glyph's exact position.
-//   Export B: the same copy with the fill cleared on the text the plugin window checked.
-// The plugin window (ui.ts) does the PDF work and asks Font Helper for the fonts.
+// figma-export-pdf, Figma side. Choosing the plugin starts the export straight away: no
+// window, no button, and nothing in your file changes. Each frame or slide is exported once
+// with Figma's own PDF export, whose hidden text layer gives every glyph's exact position.
+// The plugin's hidden window (ui.ts) asks Font Helper for the fonts, swaps Figma's letter
+// outlines for real text and saves the PDF. Progress shows at the bottom of the screen.
 import { solidFill } from "./fills";
-import type { ClearRange, PageJob, TextInfo, ToMain, ToUI } from "./types";
-
-figma.showUI(__html__, { width: 340, height: 480, themeColors: true });
+import type { PageJob, TextInfo, ToMain, ToUI } from "./types";
 
 const KEY = "fontHelperKey";
 const post = (m: ToUI) => figma.ui.postMessage(m);
-const waiting = new Map<number, (r: ClearRange[]) => void>();
-let running = false;
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-figma.ui.onmessage = async (m: ToMain) => {
-  switch (m.type) {
-    case "get-key":
-      post({ type: "key", key: ((await figma.clientStorage.getAsync(KEY)) as string | undefined) ?? null });
-      break;
-    case "set-key":
-      await figma.clientStorage.setAsync(KEY, m.key);
-      break;
-    case "run":
-      if (running) return;
-      running = true;
-      run().catch((e) => post({ type: "error", message: errText(e) })).then(() => { running = false; });
-      break;
-    case "clear":
-      waiting.get(m.index)?.(m.ranges);
-      waiting.delete(m.index);
-      break;
-    case "notify":
-      figma.notify(m.text, { error: !!m.error });
-      break;
-    case "close":
-      figma.closePlugin();
-      break;
-  }
-};
+// ---------- messages at the bottom of the screen ----------
+
+let cancelled = false;
+let shown: NotificationHandler | undefined;
+
+/** Shows a message, replacing the one before. */
+function say(text: string, options: NotificationOptions = {}) {
+  const old = shown;
+  shown = figma.notify(text, options);
+  old?.cancel();
+}
+
+function progress(text: string) {
+  say(text, {
+    timeout: Infinity,
+    button: { text: "Cancel", action: () => { cancelled = true; finish("Export cancelled."); return true; } },
+  });
+}
+
+let closing = false;
+
+/** Ends the run: closes the plugin once the last message has gone. */
+function finish(message: string, report = "", error = false) {
+  if (closing) return;
+  closing = true;
+  const close = () => { shown = undefined; figma.closePlugin(); };
+  say(message, {
+    error,
+    timeout: report ? 12000 : 6000,
+    button: report ? {
+      text: "Details",
+      action: () => {
+        // Keep the plugin open to show the details; closing the window ends it.
+        figma.ui.resize(360, 420);
+        figma.ui.show();
+        post({ type: "details", report });
+        return true;
+      },
+    } : undefined,
+    onDequeue: (reason) => { if (reason !== "action_button_click") close(); },
+  });
+}
 
 // ---------- what to export ----------
 
@@ -68,11 +81,8 @@ function slidesInOrder(): SceneNode[] {
 function pickRoots(): SceneNode[] {
   const sel = figma.currentPage.selection;
   if (figma.editorType === "slides") {
-    const all = slidesInOrder();
-    if (!sel.length) return all.filter((s) => s.visible);
-    const chosen = new Set(sel.map(exportRoot));
-    const ordered = all.filter((s) => chosen.has(s));
-    return ordered.concat([...chosen].filter((s) => !ordered.includes(s)));
+    // Every slide, in order, whatever is selected.
+    return slidesInOrder();
   }
   const list = sel.length
     ? [...new Set(sel.map(exportRoot))]
@@ -127,7 +137,7 @@ interface TextRecord {
   reason?: string;
 }
 
-/** Walks the copy in drawing order, noting for each text layer anything that stops it from becoming real text. */
+/** Walks the frame or slide in drawing order, noting for each text layer anything that stops it from becoming real text. */
 function survey(root: SceneNode): { texts: TextRecord[]; order: SceneNode[] } {
   const texts: TextRecord[] = [];
   const order: SceneNode[] = [];
@@ -197,76 +207,70 @@ function describe(t: TextRecord, origin: Rect): TextInfo {
 
 // ---------- exporting ----------
 
-async function makeCopy(root: SceneNode): Promise<SceneNode> {
-  const copy = root.clone();
-  if (root.type !== "SLIDE") {
-    // Off to the side on the page, so it doesn't push anything around or show over your work.
-    const abs = root.absoluteBoundingBox;
-    if (copy.parent?.type !== "PAGE") figma.currentPage.appendChild(copy);
-    if (abs) { copy.x = abs.x + 100000; copy.y = abs.y; }
-  }
-  return copy;
-}
+figma.showUI(__html__, { visible: false, width: 360, height: 420, themeColors: true });
 
-async function clearText(copy: SceneNode, ranges: ClearRange[]): Promise<string[]> {
-  const failed: string[] = [];
-  const byId = new Map<string, ClearRange[]>();
-  for (const r of ranges) byId.set(r.id, (byId.get(r.id) ?? []).concat([r]));
-  for (const [id, rs] of byId) {
-    try {
-      const n = (await figma.getNodeByIdAsync(id)) as TextNode | null;
-      if (!n || n.type !== "TEXT") throw new Error("layer not found");
-      for (const f of n.getRangeAllFontNames(0, n.characters.length)) await figma.loadFontAsync(f);
-      for (const r of rs) n.setRangeFills(r.start, r.end, []);
-    } catch (e) {
-      failed.push(id);
-    }
+let pageDone: (() => void) | undefined;
+let uiReady: ((m: ToMain) => void) | undefined;
+
+figma.ui.onmessage = async (m: ToMain) => {
+  switch (m.type) {
+    case "set-key":
+      await figma.clientStorage.setAsync(KEY, m.key);
+      break;
+    case "go": case "stop":
+      uiReady?.(m);
+      break;
+    case "page-done":
+      pageDone?.();
+      break;
+    case "status":
+      if (!cancelled && !closing) progress(m.text);
+      break;
+    case "finished":
+      finish(m.message, m.report, m.error);
+      break;
+    case "close":
+      figma.closePlugin();
+      break;
   }
-  return failed;
-}
+};
 
 async function run() {
   const roots = pickRoots().filter((n) => "exportAsync" in n);
   if (!roots.length) {
-    post({ type: "error", message: figma.editorType === "slides" ? "There are no slides to export." : "Select one or more frames to export." });
+    finish(figma.editorType === "slides" ? "There are no slides to export." : "Select one or more frames to export.", "", true);
     return;
   }
-  const fileName = (roots.length === 1 ? roots[0].name : figma.root.name) || "Export";
-  post({ type: "start", count: roots.length, fileName });
+  const fileName = (figma.editorType === "slides" || roots.length > 1 ? figma.root.name : roots[0].name) || "Export";
+  const what = figma.editorType === "slides" ? "slide" : "frame";
+  progress(`Exporting ${roots.length} ${what}${roots.length === 1 ? "" : "s"}…`);
 
-  for (let i = 0; i < roots.length; i++) {
+  const key = ((await figma.clientStorage.getAsync(KEY)) as string | undefined) ?? null;
+  const answer = await new Promise<ToMain>((resolve) => {
+    uiReady = resolve;
+    post({ type: "init", key, count: roots.length, fileName });
+  });
+  if (answer.type === "stop") { finish(answer.message, "", true); return; }
+
+  for (let i = 0; i < roots.length && !cancelled; i++) {
     const root = roots[i];
-    post({ type: "progress", text: `${root.name} (${i + 1} of ${roots.length})` });
-    let copy: SceneNode | undefined;
-    try {
-      copy = await makeCopy(root);
-      const origin = copy.absoluteBoundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
-      const { texts } = survey(copy);
-      const a = await copy.exportAsync({ format: "PDF" });
-      const job: PageJob = {
-        index: i, name: root.name, width: origin.width, height: origin.height, a,
-        texts: texts.map((t) => describe(t, origin)),
-      };
-      const ranges = await new Promise<ClearRange[]>((resolve) => {
-        waiting.set(i, resolve);
-        post({ type: "page-a", job });
-      });
-      const failed = await clearText(copy, ranges);
-      let b: Uint8Array | null = null;
-      let problem: string | undefined;
-      let nothingVisible = false;
-      if (ranges.length) {
-        try {
-          b = await copy.exportAsync({ format: "PDF" });
-        } catch (e) {
-          problem = errText(e);
-          nothingVisible = /visible/i.test(problem);
-        }
-      }
-      post({ type: "page-b", index: i, b, problem, nothingVisible, failed });
-    } finally {
-      try { copy?.remove(); } catch (e) { /* already gone */ }
-    }
+    progress(`Exporting ${what} ${i + 1} of ${roots.length}…`);
+    const origin = root.absoluteBoundingBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const { texts } = survey(root);
+    const a = await root.exportAsync({ format: "PDF" });
+    const job: PageJob = {
+      index: i, name: root.name, width: origin.width, height: origin.height, a,
+      texts: texts.map((t) => describe(t, origin)),
+    };
+    await new Promise<void>((resolve) => {
+      pageDone = resolve;
+      post({ type: "page", job });
+    });
   }
-  post({ type: "done" });
+  if (!cancelled) {
+    progress("Putting the PDF together…");
+    post({ type: "done" });
+  }
 }
+
+run().catch((e) => finish(`Export failed: ${errText(e)}`, "", true));

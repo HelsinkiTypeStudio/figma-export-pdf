@@ -1,5 +1,6 @@
 // Runs the plugin's PDF side outside Figma, on exports saved by the figma-export-pdf test
-// plugin (test02): "<stem>-A-as-is.pdf", "<stem>-B-all-text-cleared.pdf", "<stem>-texts.json".
+// plugin (test02): "<stem>-A-as-is.pdf" (Figma's own PDF) and "<stem>-texts.json" (the text
+// layers). Writes "<stem>-real-text.pdf" and lists which lines stayed as outlines, and why.
 // Font Helper's font work (fontwork.py) is run directly, with font files found by family name.
 //
 // node test/run.mjs <exports folder> <fonts folder> <path to fontwork.py> <output folder>
@@ -46,10 +47,9 @@ function texts(json: any): TextInfo[] {
 async function main() {
   const stems = readdirSync(exportsDir).filter((f) => f.endsWith("-A-as-is.pdf")).map((f) => f.slice(0, -"-A-as-is.pdf".length));
   for (const stem of stems) {
-    let json: any, bBytes: Uint8Array;
+    let json: any;
     try {
       json = JSON.parse(readFileSync(join(exportsDir, stem + "-texts.json"), "utf8"));
-      bBytes = readFileSync(join(exportsDir, stem + "-B-all-text-cleared.pdf"));
     } catch { continue; }
     const t0 = Date.now();
     const aDoc = await PDFDocument.load(readFileSync(join(exportsDir, stem + "-A-as-is.pdf")));
@@ -63,8 +63,8 @@ async function main() {
     }
     finishPlan(plan);
     try {
-      const { doc, written, kept } = await assemblePage(aDoc, a, bBytes, plan);
-      const bytes = await doc.save({ useObjectStreams: true });
+      const { written, kept } = assemblePage(aDoc, a, plan);
+      const bytes = await aDoc.save({ useObjectStreams: true });
       const out = join(outDir, basename(stem) + "-real-text.pdf");
       writeFileSync(out, bytes);
       const reasons = new Map<string, number>();

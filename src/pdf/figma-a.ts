@@ -29,6 +29,9 @@ export interface Glyph {
   font: string;
   code: number;
   chars: string;
+  /** Position along the line, in text space units (em times the Tf size), and the Tf size. */
+  x: number;
+  size: number;
 }
 
 export interface HiddenLine {
@@ -143,6 +146,7 @@ export function readExportA(doc: PDFDocument): ExportA {
   let font = "";
   let fontSize = 1;
   let arrayDepth = 0;
+  let tx = 0;
   let arrayItems: Token[] = [];
 
   const nums = () => ops.filter((t) => t.kind === "num").map((t) => (t as { value: number }).value);
@@ -163,6 +167,7 @@ export function readExportA(doc: PDFDocument): ExportA {
       } else if (op === "BT") {
         inText = true;
         tm = IDENTITY;
+        tx = 0;
         line = { index: lines.length, start: t.start, end: t.end, ctm, tm, parts: [], glyphs: [], text: "", size: 0, x: 0, y: 0 };
       }
     } else if (line) {
@@ -185,6 +190,7 @@ export function readExportA(doc: PDFDocument): ExportA {
         }
         tm = v.slice(-6) as Matrix;
         line.tm = tm;
+        tx = 0;
       } else if (op === "Tf") {
         const n = ops.filter((x) => x.kind === "name").pop();
         const v = nums();
@@ -194,13 +200,17 @@ export function readExportA(doc: PDFDocument): ExportA {
       } else if (op === "TJ" || op === "Tj") {
         const items = op === "TJ" ? arrayItems : ops.filter((x) => x.kind === "str");
         for (const it of items) {
-          if (it.kind === "num") line.parts.push({ kind: "adjust", value: it.value });
-          else if (it.kind === "str") {
+          if (it.kind === "num") {
+            line.parts.push({ kind: "adjust", value: it.value });
+            tx -= (it.value / 1000) * fontSize;
+          } else if (it.kind === "str") {
             line.parts.push({ kind: "glyphs", font, codes: it.bytes.slice() });
             const f = fonts.get(font);
             for (const code of it.bytes) {
-              line.glyphs.push({ font, code, chars: f?.unicode.get(code) ?? "" });
-              if (!f || !f.glyphs.has(code)) line.unsupported = `glyph ${code} of font ${font} has no measurements`;
+              line.glyphs.push({ font, code, chars: f?.unicode.get(code) ?? "", x: tx, size: fontSize });
+              const g = f?.glyphs.get(code);
+              if (!g) line.unsupported = `glyph ${code} of font ${font} has no measurements`;
+              else tx += g.w * fontSize;
             }
           }
         }

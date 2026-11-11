@@ -43,25 +43,17 @@ export interface PageJob {
   texts: TextInfo[];
 }
 
-export interface ClearRange {
-  id: string;
-  start: number;
-  end: number;
-}
-
 export type ToUI =
-  | { type: "start"; count: number; fileName: string }
-  | { type: "page-a"; job: PageJob }
-  | { type: "page-b"; index: number; b: Uint8Array | null; problem?: string; nothingVisible?: boolean; failed: string[] }
+  | { type: "init"; key: string | null; count: number; fileName: string }
+  | { type: "page"; job: PageJob }
   | { type: "done" }
-  | { type: "error"; message: string }
-  | { type: "key"; key: string | null }
-  | { type: "progress"; text: string };
+  | { type: "details"; report: string };
 
 export type ToMain =
-  | { type: "run" }
-  | { type: "clear"; index: number; ranges: ClearRange[] }
-  | { type: "get-key" }
   | { type: "set-key"; key: string | null }
-  | { type: "notify"; text: string; error?: boolean }
+  | { type: "go" }
+  | { type: "stop"; message: string }
+  | { type: "page-done" }
+  | { type: "status"; text: string }
+  | { type: "finished"; message: string; report: string; error?: boolean }
   | { type: "close" };
