@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 16px; font: 12px/1.5 Inter, system-ui, sans-serif;
+    color: var(--figma-color-text, #222); background: var(--figma-color-bg, #fff);
+  }
+  h1 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  #report { white-space: pre-wrap; color: var(--figma-color-text-secondary, #666); }
+  button {
+    margin-top: 16px; width: 100%; padding: 8px; border: 0; border-radius: 6px; font: inherit; font-weight: 600;
+    background: var(--figma-color-bg-brand, #0d99ff); color: var(--figma-color-text-onbrand, #fff); cursor: pointer;
+  }
+</style>
+</head>
+<body hidden>
+  <h1>Export details</h1>
+  <div id="report"></div>
+  <button id="close">Close</button>
+  <script>/*UI_SCRIPT*/</script>
+</body>
+</html>
